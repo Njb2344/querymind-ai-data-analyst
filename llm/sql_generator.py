@@ -52,4 +52,8 @@ def generate_sql(user_question: str) -> str:
     # Remove markdown formatting if present
     sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
 
+    # If LLM added text like "Here is the SQL query:"
+    if "SELECT" in sql_query:
+        sql_query = sql_query[sql_query.upper().find("SELECT"):]  
+
     return sql_query

@@ -20,10 +20,24 @@ def main():
             break
 
         try:
-            df = run_question(question)
+            df, chart_path, insight = run_question(question)
 
             print("\nResults:")
             print(df)
+
+            # -------------------------------------------------
+            # Display chart location (if generated)
+            # -------------------------------------------------
+
+            if chart_path:
+                print("\nChart saved at:", chart_path)
+
+            # -------------------------------------------------
+            # Display AI explanation
+            # -------------------------------------------------
+
+            print("\nAI Explanation:")
+            print(insight)
 
         except Exception as e:
             print("\nError:", e)
