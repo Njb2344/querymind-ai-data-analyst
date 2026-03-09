@@ -18,6 +18,7 @@ Return results as pandas DataFrame
 from llm.sql_generator import generate_sql
 from utils.sql_validator import validate_sql
 from database.query_runner import run_query
+from llm.explanation import generate_explanation
 
 
 def run_question(question: str):
@@ -61,5 +62,12 @@ def run_question(question: str):
     df = run_query(sql_query)
 
     print("\nQuery executed successfully.")
+
+    # -------------------------------------------------
+    # Step 4 — Generate insight
+    # -------------------------------------------------
+    insight = generate_explanation(question, df)
+
+    print(insight)
 
     return df
