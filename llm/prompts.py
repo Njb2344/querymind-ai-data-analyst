@@ -39,6 +39,7 @@ order_delivered_customer_date
 order_items
 -----------
 order_id (foreign key -> orders.order_id)
+order_item_id
 product_id
 price
 freight_value
@@ -50,6 +51,21 @@ product_id (primary key)
 product_category_name
 """
 
+# -----------------------------------------------------
+# DATASET RULES
+# -----------------------------------------------------
+
+DATASET_RULES = """
+Dataset Rules:
+
+1. The table order_items does NOT contain a quantity column.
+2. Each row in order_items represents ONE purchased item.
+3. Therefore sales must be calculated as:
+
+SUM(order_items.price)
+
+4. To compute total revenue, always use SUM(price).
+"""
 
 # -----------------------------------------------------
 # TABLE RELATIONSHIPS
@@ -69,15 +85,18 @@ order_items.product_id → products.product_id
 # -----------------------------------------------------
 
 SQL_RULES = """
-Rules for SQL generation:
+Rules for generating SQL:
 
-1. Only generate SELECT queries.
-2. Do NOT generate DELETE, UPDATE, INSERT, DROP, or ALTER.
-3. Always use proper JOIN conditions when querying multiple tables.
-4. Use LIMIT 100 when the query could return many rows.
-5. The database is PostgreSQL.
-6. Return ONLY the SQL query.
-7. Do not include explanations or comments.
+- Only use the tables provided in the schema.
+- Never invent columns.
+- Never use a column named quantity.
+- Always aggregate revenue using SUM(order_items.price).
+- Always use GROUP BY when aggregating.
+- Prefer clear aliases for tables:
+    customers -> c
+    orders -> o
+    order_items -> oi
+    products -> p
 """
 
 

@@ -89,4 +89,9 @@ def run_question(question: str):
 
     print(insight)
 
-    return df, chart_path, insight
+    return {
+        "sql": sql_query,
+        "dataframe": df, 
+        "chart_path": chart_path,
+        "insight": insight
+    }
