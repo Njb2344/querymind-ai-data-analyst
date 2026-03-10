@@ -38,6 +38,25 @@ st.set_page_config(
 )
 
 st.title("📊 QueryMind — AI Data Analyst")
+st.caption("Natural language analytics powered by LLM + PostgreSQL")
+
+# ---------------------------------------------------
+# SESSION STATE (CHAT HISTORY)
+# ---------------------------------------------------
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# ---------------------------------------------------
+# Display chat history
+# ---------------------------------------------------
+
+for item in st.session_state.history:
+    with st.chat_message("user"):
+        st.write(item["question"])
+
+    with st.chat_message("assistant"):
+        st.write("Analysis generated")
 
 st.markdown(
 """
@@ -55,14 +74,14 @@ Examples:
 # USER INPUT
 # ---------------------------------------------------
 
-question = st.text_input("Ask your question")
+question = st.chat_input("Ask a business question")
 
 
 # ---------------------------------------------------
 # RUN QUERY BUTTON
 # ---------------------------------------------------
 
-if st.button("Run Analysis"):
+if question:
 
     if question.strip() == "":
         st.warning("Please enter a question.")
@@ -76,6 +95,11 @@ if st.button("Run Analysis"):
         df = result["dataframe"]
         sql = result["sql"]
 
+        # Save the question in history
+        st.session_state.history.append({
+            "question": question
+        })
+
         # -------------------------
         # Show SQL
         # -------------------------
@@ -88,34 +112,51 @@ if st.button("Run Analysis"):
         # Show Data
         # -------------------------
 
-        st.subheader("Query Results")
+        col1, col2 = st.columns([2,1])
 
-        st.dataframe(df)
+        # Show results and chart in left column
+        # Left Column → Results + Chart
 
-        # -------------------------
-        # Visualization
-        # -------------------------
+        with col1:
 
-        chart_type = select_chart(df)
+            # -------------------------
+            # Show Data
+            # -------------------------
+            st.subheader("Query Results")
+            st.dataframe(df)
 
-        if chart_type != "table":
+            # -------------------------
+            # visualization
+            # -------------------------
 
-            st.subheader("Visualization")
+            chart_type = select_chart(df)
 
-            chart_path = generate_chart(df, chart_type)
+            if chart_type != "table":
 
-            st.image(chart_path)
+                st.subheader("Visualization")
 
-        else:
-            st.info("No chart available for this result.")
+                chart_path = generate_chart(df, chart_type)
 
-        # -------------------------
-        # Insight
-        # -------------------------
-        st.subheader("AI Insight")
-        st.write(result["insight"])
+                st.image(chart_path)
 
-        
+            else:
+                st.info("No chart available for this result.")
+
+        # Show insight in right column
+        # Right Column → Insight
+
+        with col2:
+
+            # -------------------------
+            # Insight
+            # -------------------------
+            st.subheader("AI Analyst")
+
+            st.markdown("**Generated SQL**")
+            st.code(sql, language="sql")
+
+            st.markdown("**Insight**")
+            st.write(result.get("insight", "No insight generated"))    
 
     except Exception as e:
 
