@@ -104,7 +104,7 @@ python database/load_data.py
 
 ### Configuration
 
-Edit `.env` and update values if needed:
+Edit `.env.example` and update values if needed:
 
 ```
 DB_HOST=localhost
