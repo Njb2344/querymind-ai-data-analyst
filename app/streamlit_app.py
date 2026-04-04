@@ -1,21 +1,17 @@
 """
 streamlit_app.py
 
-This file implements the Streamlit web interface for QueryMind.
+Streamlit web interface for QueryMind.
 
 QueryMind is an AI-powered data analyst that allows users to:
 - Ask questions in natural language
 - Automatically generate SQL queries
 - Execute them on a PostgreSQL database
-- Visualize results
+- Visualize results with charts and dashboards
 - Generate insights and reports
+- Export results as CSV or charts
 
 This module ONLY handles the UI layer.
-
-The backend logic is handled by other modules:
-    pipelines/           → query pipeline
-    visualization/       → charts and dashboards
-    analysis/            → EDA, query planning, reports
 """
 
 # ---------------------------------------------------
@@ -24,88 +20,73 @@ The backend logic is handled by other modules:
 
 import sys
 import os
+import io
+import logging
 
 # Add project root directory to Python path
-# This allows us to import modules like:
-# pipelines.query_pipeline
-# visualization.chart_generator
-# analysis.eda_engine
 sys.path.append(
     os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..")
     )
 )
 
-# Streamlit is the framework used to create the web UI
 import streamlit as st
-
-# Pandas handles tabular data returned from the database
 import pandas as pd
+import matplotlib.pyplot as plt
 
+from config.settings import LOG_LEVEL, LOG_FORMAT
+
+# Configure logging
+logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------
 # IMPORT INTERNAL PROJECT MODULES
 # ---------------------------------------------------
 
-# Main AI pipeline
-# Responsible for: question → SQL → dataframe → insight
 from pipelines.query_pipeline import run_question
-
-# Chart utilities
 from visualization.chart_selector import select_chart
 from visualization.chart_generator import generate_chart
 from visualization.dashboard_generator import generate_dashboard
-
-# Exploratory Data Analysis engine
 from analysis.eda_engine import run_eda
-
-# AI query planner (splits complex questions into multiple queries)
 from analysis.query_planner import plan_queries
-
-# AI report generator
 from analysis.report_generator import generate_report
+from llm.explanation import generate_followup_suggestions
 
 
 # ---------------------------------------------------
-# STREAMLIT PAGE CONFIGURATION
+# PAGE CONFIGURATION
 # ---------------------------------------------------
 
-# Configure browser tab title, icon, and layout
 st.set_page_config(
     page_title="QueryMind AI Analyst",
     page_icon="📊",
     layout="wide"
 )
 
-# Main page title
 st.title("📊 QueryMind — AI Data Analyst")
-
-# Short subtitle explaining the tool
-st.caption(
-    "Natural language analytics powered by LLM + PostgreSQL"
-)
+st.caption("Natural language analytics powered by LLM + PostgreSQL")
 
 
 # ---------------------------------------------------
 # SESSION STATE INITIALIZATION
 # ---------------------------------------------------
 
-
-# Chat history
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# Conversation memory for follow-up questions
 if "conversation_context" not in st.session_state:
     st.session_state.conversation_context = []
 
-# Preset question selected from sidebar
 if "preset_question" not in st.session_state:
     st.session_state.preset_question = None
 
+if "last_suggestions" not in st.session_state:
+    st.session_state.last_suggestions = []
+
 
 # ---------------------------------------------------
-# SIDEBAR EXAMPLE QUESTIONS
+# SIDEBAR
 # ---------------------------------------------------
 
 st.sidebar.title("Example Questions")
@@ -118,88 +99,68 @@ example_questions = [
     "Analyze sales performance"
 ]
 
-# Create a button for each example question
 for q in example_questions:
-
-    if st.sidebar.button(q):
-
-        # Save selected question in session state
+    if st.sidebar.button(q, key=f"sidebar_{q}"):
         st.session_state.preset_question = q
 
+st.sidebar.divider()
+st.sidebar.caption("QueryMind v1.0")
+st.sidebar.caption("Powered by Llama3 + PostgreSQL")
+
 
 # ---------------------------------------------------
-# USER QUESTION INPUT
+# USER INPUT
 # ---------------------------------------------------
 
+question = st.chat_input("Ask a business question...")
 
-# Chat input box
-question = st.chat_input("Ask a business question")
-
-# If user clicked a sidebar example
 if st.session_state.preset_question:
-
-    # Replace input question with preset question
     question = st.session_state.preset_question
-
-    # Reset preset value
     st.session_state.preset_question = None
 
 
 # ---------------------------------------------------
-# DISPLAY PREVIOUS CHAT HISTORY
+# DISPLAY CHAT HISTORY
 # ---------------------------------------------------
 
-"""
-Display previously asked questions.
-
-Each question appears as a chat message.
-"""
-
 for item in st.session_state.history:
-
     with st.chat_message("user"):
         st.write(item["question"])
-
     with st.chat_message("assistant"):
         st.write("Analysis generated")
 
 
 # ---------------------------------------------------
-# HANDLE NEW USER QUESTION
+# HANDLE NEW QUESTION
 # ---------------------------------------------------
 
 if question:
 
-    # Display user message in chat
     with st.chat_message("user"):
         st.write(question)
 
     try:
-
         # ---------------------------------------------------
         # QUERY PLANNER
         # ---------------------------------------------------
 
-        queries = plan_queries(question)
+        with st.spinner("Planning analysis..."):
+            queries = plan_queries(question)
 
         results = []
 
-        # Run pipeline for each query
         for q in queries:
+            with st.spinner(f"Analyzing: {q}..."):
+                result = run_question(
+                    q,
+                    context=st.session_state.conversation_context
+                )
+                results.append((q, result))
 
-            result = run_question(
-                q,
-                context=st.session_state.conversation_context
-            )
-
-            results.append((q, result))
-
-            # Store context for follow-up questions
-            st.session_state.conversation_context.append({
-                "question": q,
-                "sql": result["sql"]
-            })
-
+                st.session_state.conversation_context.append({
+                    "question": q,
+                    "sql": result["sql"]
+                })
 
         # ---------------------------------------------------
         # DISPLAY RESULTS
@@ -211,24 +172,12 @@ if question:
             sql = result["sql"]
             insight = result.get("insight", "No insight generated.")
 
-            # Save question in chat history
             st.session_state.history.append({"question": q})
 
             st.divider()
             st.subheader(f"Analysis: {q}")
 
-
-            # ---------------------------------------------------
-            # TWO-COLUMN LAYOUT
-            # ---------------------------------------------------
-
-            """
-            Left column → data and charts
-            Right column → AI explanation
-            """
-
             col1, col2 = st.columns([2, 1])
-
 
             # ---------------------------------------------------
             # LEFT COLUMN (DATA + VISUALIZATION)
@@ -236,84 +185,93 @@ if question:
 
             with col1:
 
-                # Display dataframe
-                st.write("Query Results")
-                st.dataframe(df)
+                # Dataframe display
+                st.write("**Query Results**")
+                st.dataframe(df, use_container_width=True)
 
+                # ---------------------------------------------------
+                # EXPORT: CSV Download
+                # ---------------------------------------------------
+
+                csv_data = df.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv_data,
+                    file_name=f"querymind_results.csv",
+                    mime="text/csv",
+                    key=f"csv_{q}_{len(st.session_state.history)}"
+                )
 
                 # ---------------------------------------------------
                 # EDA MODE
                 # ---------------------------------------------------
 
-                """
-                If the user asks for dataset explanation,
-                run automatic exploratory data analysis.
-                """
-
                 if (
                     "explain dataset" in question.lower()
                     or "eda" in question.lower()
                 ):
-
                     st.subheader("Dataset Analysis")
 
-                    eda = run_eda(df)
+                    with st.spinner("Running exploratory analysis..."):
+                        eda = run_eda(df)
 
-                    # Dataset summary
-                    st.write("Dataset Summary")
+                    st.write("**Dataset Summary**")
                     st.json(eda["summary"])
 
-                    # Missing values
                     if not eda["missing"].empty:
-                        st.write("Missing Values")
+                        st.write("**Missing Values**")
                         st.dataframe(eda["missing"])
 
-                    # Distribution plots
-                    st.write("Distributions")
-
+                    st.write("**Distributions**")
                     for fig in eda["distributions"]:
                         st.pyplot(fig)
+                        plt.close(fig)
 
-                    # Correlation heatmap
                     if eda["correlation"]:
-                        st.write("Correlation Heatmap")
+                        st.write("**Correlation Heatmap**")
                         st.pyplot(eda["correlation"])
+                        plt.close(eda["correlation"])
 
-                    # Automatic insights
-                    st.write("Automatic Insights")
-
+                    st.write("**Automatic Insights**")
                     for line in eda["insights"]:
-                        st.write("-", line)
-
+                        st.write(f"- {line}")
 
                 # ---------------------------------------------------
-                # AI DASHBOARD
+                # DASHBOARD
                 # ---------------------------------------------------
 
                 st.subheader("Dashboard")
 
                 if len(df) > 3:
+                    with st.spinner("Generating dashboard..."):
+                        figures = generate_dashboard(df)
 
-                    # Generate multiple charts
-                    figures = generate_dashboard(df)
-
-                    for fig in figures:
+                    for i, fig in enumerate(figures):
                         st.pyplot(fig)
 
+                        # Export: Chart Download
+                        buf = io.BytesIO()
+                        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+                        buf.seek(0)
+
+                        st.download_button(
+                            label=f"Download Chart {i + 1}",
+                            data=buf,
+                            file_name=f"chart_{i + 1}.png",
+                            mime="image/png",
+                            key=f"chart_{q}_{i}_{len(st.session_state.history)}"
+                        )
+
+                        plt.close(fig)
+
                 else:
-
-                    # Fallback single chart
                     chart_type = select_chart(df)
-
                     if chart_type != "table":
-
                         chart_path = generate_chart(df, chart_type)
-
-                        st.image(chart_path)
-
+                        if chart_path:
+                            st.image(chart_path)
                     else:
-                        st.info("No chart available.")
-
+                        st.info("Not enough data for chart visualization.")
 
             # ---------------------------------------------------
             # RIGHT COLUMN (AI ANALYST PANEL)
@@ -323,68 +281,92 @@ if question:
 
                 st.subheader("AI Analyst")
 
-                # Display generated SQL query
                 st.markdown("**Generated SQL**")
                 st.code(sql, language="sql")
 
-                # AI explanation
                 st.markdown("**Insight**")
                 st.write(insight)
 
-
             # ---------------------------------------------------
-            # AI REPORT GENERATION
+            # AI REPORT
             # ---------------------------------------------------
 
-            if st.button(f"Generate AI Report for: {q}"):
-
-                report = generate_report(df, q)
+            if st.button(
+                f"Generate AI Report",
+                key=f"report_{q}_{len(st.session_state.history)}"
+            ):
+                with st.spinner("Generating AI report..."):
+                    report = generate_report(df, q)
 
                 st.subheader("AI Business Report")
 
-                st.write("Summary")
+                st.write("**Summary**")
                 st.write(report["summary"])
 
-                st.write("Key Findings")
+                st.write("**Key Findings**")
                 for f in report["findings"]:
-                    st.write("-", f)
+                    st.write(f"- {f}")
 
-                st.write("Observations")
+                st.write("**Observations**")
                 for o in report["observations"]:
-                    st.write("-", o)
+                    st.write(f"- {o}")
 
-                st.write("Business Implications")
-                for i in report["implications"]:
-                    st.write("-", i)
+                st.write("**Business Implications**")
+                for imp in report["implications"]:
+                    st.write(f"- {imp}")
 
 
         # ---------------------------------------------------
-        # FOLLOW-UP QUESTIONS
+        # FOLLOW-UP SUGGESTIONS (LLM-generated)
         # ---------------------------------------------------
 
         st.subheader("Suggested Follow-up Questions")
 
-        suggestions = [
-            "Revenue trend over time",
-            "Top products in the best state",
-            "Orders by product category",
-            "Top customers by revenue"
-        ]
+        # Use last result for context-aware suggestions
+        if results:
+            last_q, last_result = results[-1]
+            last_df = last_result["dataframe"]
 
-        cols = st.columns(len(suggestions))
+            with st.spinner("Generating suggestions..."):
+                suggestions = generate_followup_suggestions(
+                    last_q,
+                    last_df,
+                    context=st.session_state.conversation_context
+                )
+                st.session_state.last_suggestions = suggestions
+        else:
+            suggestions = st.session_state.last_suggestions
 
-        for i, q in enumerate(suggestions):
-
-            if cols[i].button(q):
-
-                st.session_state.preset_question = q
-                st.rerun()
+        if suggestions:
+            cols = st.columns(min(len(suggestions), 4))
+            for i, s in enumerate(suggestions):
+                if cols[i].button(
+                    s,
+                    key=f"followup_{s}_{len(st.session_state.history)}"
+                ):
+                    st.session_state.preset_question = s
+                    st.rerun()
 
 
     # ---------------------------------------------------
     # ERROR HANDLING
     # ---------------------------------------------------
 
-    except Exception as e:
+    except ConnectionError as e:
+        st.error(f"Connection Error: {e}")
+        st.info(
+            "Please make sure Ollama and PostgreSQL are running."
+        )
 
+    except ValueError as e:
+        st.warning(f"Validation Error: {e}")
+
+    except RuntimeError as e:
         st.error(f"Error: {e}")
+
+    except Exception as e:
+        logger.exception("Unexpected error in Streamlit app:")
+        st.error(
+            f"An unexpected error occurred: {e}\n\n"
+            "Please try again or rephrase your question."
+        )

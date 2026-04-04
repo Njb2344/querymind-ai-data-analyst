@@ -1,118 +1,122 @@
 """
 query_pipeline.py
 
-This module orchestrates the full query process:
+Orchestrates the full query process:
 
-User Question
-      ↓
-Generate SQL using LLM
-      ↓
-Validate SQL for safety
-      ↓
-Execute query on PostgreSQL
-      ↓
-Return results as pandas DataFrame
+    User Question
+          |
+    Generate SQL using LLM
+          |
+    Validate SQL for safety
+          |
+    Execute query on PostgreSQL
+          |
+    Generate chart + insights
+          |
+    Return structured results
 """
 
-# Import modules
+import logging
+
 from llm.sql_generator import generate_sql
 from utils.sql_validator import validate_sql
 from database.query_runner import run_query
 from llm.explanation import generate_explanation
 from visualization.chart_selector import select_chart
 from visualization.chart_generator import generate_chart
+from config.settings import MAX_CONTEXT_HISTORY
+
+logger = logging.getLogger(__name__)
 
 
-def run_question(question: str, context=None):
+def run_question(question: str, context: list = None) -> dict:
     """
     Run a full natural language query pipeline.
 
     Parameters
     ----------
     question : str
-        User natural language question
+        User natural language question.
+    context : list, optional
+        List of previous question/sql dicts for conversation memory.
 
     Returns
     -------
-    pandas.DataFrame
-        Query results
+    dict
+        {
+            "sql": str,
+            "dataframe": pandas.DataFrame,
+            "chart_path": str or None,
+            "insight": str
+        }
+
+    Raises
+    ------
+    ConnectionError
+        If Ollama or database is unreachable.
+    ValueError
+        If the generated SQL is unsafe.
+    RuntimeError
+        If the query fails at any step.
     """
-
-    print("\nUser Question:")
-    print(question)
+    logger.info("Processing question: %s", question)
 
     # -------------------------------------------------
-    # STEP 0 — BUILD CONTEXT FOR LLM
+    # Step 0 - Build context for LLM
     # -------------------------------------------------
-
-    # If conversation history exists, build a context string
     history_text = ""
 
     if context:
-
-        # Only use the last few queries to avoid long prompts
-        recent_context = context[-3:]
-
+        recent_context = context[-MAX_CONTEXT_HISTORY:]
         for item in recent_context:
-
-            history_text += f"""
-Previous Question: {item['question']}
-SQL Used: {item['sql']}
-"""
-            
-    
+            history_text += (
+                f"\nPrevious Question: {item['question']}\n"
+                f"SQL Used: {item['sql']}\n"
+            )
 
     # -------------------------------------------------
-    # Step 1 — Generate SQL from LLM
+    # Step 1 - Generate SQL from LLM
     # -------------------------------------------------
-
+    logger.info("Step 1: Generating SQL...")
     sql_query = generate_sql(question, history_text)
 
-    print("\nGenerated SQL:")
-    print(sql_query)
+    # -------------------------------------------------
+    # Step 2 - Validate SQL safety
+    # -------------------------------------------------
+    logger.info("Step 2: Validating SQL...")
+    sql_query = validate_sql(sql_query)
 
     # -------------------------------------------------
-    # Step 2 — Validate SQL safety
+    # Step 3 - Execute SQL
     # -------------------------------------------------
-
-    if not validate_sql(sql_query):
-        raise ValueError("Unsafe SQL detected. Query blocked.")
-
-    # -------------------------------------------------
-    # Step 3 — Execute SQL
-    # -------------------------------------------------
-
+    logger.info("Step 3: Executing query...")
     df = run_query(sql_query)
 
-    print("\nQuery executed successfully.")
-
     # -------------------------------------------------
-    # Step 4 — Decide which chart to create
+    # Step 4 - Select chart type
     # -------------------------------------------------
-
+    logger.info("Step 4: Selecting chart type...")
     chart_type = select_chart(df)
 
-    print("\nSelected chart type:", chart_type)
+    # -------------------------------------------------
+    # Step 5 - Generate visualization
+    # -------------------------------------------------
+    logger.info("Step 5: Generating visualization...")
+    chart_path = None
+    if chart_type != "table":
+        chart_path = generate_chart(df, chart_type)
 
     # -------------------------------------------------
-    # Step 5 — Generate visualization
+    # Step 6 - Generate insight
     # -------------------------------------------------
-
-    chart_path = generate_chart(df, chart_type)
-
-    if chart_path:
-        print("\nChart generated at:", chart_path)
-
-    # -------------------------------------------------
-    # Step 6 — Generate insight
-    # -------------------------------------------------
+    logger.info("Step 6: Generating insights...")
     insight = generate_explanation(question, df)
 
-    print(insight)
+    logger.info("Pipeline completed successfully.")
 
     return {
         "sql": sql_query,
-        "dataframe": df, 
+        "dataframe": df,
         "chart_path": chart_path,
         "insight": insight
     }

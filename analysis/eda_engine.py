@@ -25,13 +25,16 @@ without requiring manual exploration from the user.
 # ---------------------------------------------------
 
 # Pandas for dataframe manipulation
+import logging
 import pandas as pd
-
-# Matplotlib for plotting figures
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
-# Seaborn for statistical visualizations
 import seaborn as sns
+
+from config.settings import DASHBOARD_FIGSIZE
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------
@@ -199,7 +202,7 @@ def correlation_heatmap(df):
     corr = numeric_df.corr()
 
     # Create heatmap figure
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=DASHBOARD_FIGSIZE)
 
     sns.heatmap(
         corr,

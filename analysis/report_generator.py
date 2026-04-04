@@ -1,52 +1,41 @@
 """
 report_generator.py
 
-This module generates **AI-style business reports**
-based on query results.
+Generates AI-style business reports from query results.
 
-Purpose
--------
-A traditional data analyst does not only provide
-tables and charts.
-
-They also produce structured insights such as:
-
-    • Summary
-    • Key findings
-    • Observations
-    • Business implications
-
-This module converts a dataframe into a simple
-business-style analytical report.
-
-It is NOT an LLM module — it uses heuristic logic
-based on the dataframe contents.
+Produces structured insights with:
+    - Summary
+    - Key findings (data-driven)
+    - Observations (data-driven)
+    - Business implications (data-driven)
 """
 
+import logging
 import pandas as pd
+import ollama
+
+from config.settings import LLM_MODEL, LLM_PREVIEW_ROWS
+
+logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------
-# MAIN REPORT GENERATION FUNCTION
-# ---------------------------------------------------
-
-def generate_report(df, question):
+def generate_report(df: pd.DataFrame, question: str) -> dict:
     """
     Generate a structured analytical report.
+
+    Uses a combination of heuristic analysis and LLM-generated
+    insights for data-driven observations.
 
     Parameters
     ----------
     df : pandas.DataFrame
         The dataframe returned from the SQL query.
-
     question : str
         The original user question.
 
     Returns
     -------
     dict
-        Dictionary containing structured report sections:
-
         {
             "summary": str,
             "findings": list[str],
@@ -54,90 +43,169 @@ def generate_report(df, question):
             "implications": list[str]
         }
     """
-
-    # Initialize report structure
     report = {}
 
     # ---------------------------------------------------
-    # SECTION 1 — SUMMARY
+    # Section 1 - Summary
     # ---------------------------------------------------
-
-    # Describe the size and structure of the dataset
     report["summary"] = (
         f"The query '{question}' returned a dataset "
         f"containing {df.shape[0]} rows and {df.shape[1]} columns."
     )
 
-
     # ---------------------------------------------------
-    # SECTION 2 — KEY FINDINGS
+    # Section 2 - Key Findings (data-driven)
     # ---------------------------------------------------
-
     findings = []
 
-    # Detect numeric and categorical columns
     numeric_cols = df.select_dtypes(include="number").columns
     categorical_cols = df.select_dtypes(include="object").columns
 
-    # If both numeric and categorical columns exist,
-    # we can determine top-performing entities
     if len(numeric_cols) > 0 and len(categorical_cols) > 0:
+        try:
+            top_row = df.sort_values(
+                numeric_cols[0], ascending=False
+            ).iloc[0]
+            bottom_row = df.sort_values(
+                numeric_cols[0], ascending=True
+            ).iloc[0]
 
-        # Sort dataset by first numeric column
-        top_row = df.sort_values(
-            numeric_cols[0],
-            ascending=False
-        ).iloc[0]
+            findings.append(
+                f"The top performing '{categorical_cols[0]}' "
+                f"is '{top_row[categorical_cols[0]]}' "
+                f"with {numeric_cols[0]} = {top_row[numeric_cols[0]]:.2f}."
+            )
+            findings.append(
+                f"The lowest performing '{categorical_cols[0]}' "
+                f"is '{bottom_row[categorical_cols[0]]}' "
+                f"with {numeric_cols[0]} = {bottom_row[numeric_cols[0]]:.2f}."
+            )
+        except Exception as e:
+            logger.warning("Could not compute top/bottom findings: %s", e)
 
-        findings.append(
-            f"The top performing '{categorical_cols[0]}' "
-            f"is '{top_row[categorical_cols[0]]}'."
-        )
-
-    # If numeric columns exist,
-    # compute average metric
     if len(numeric_cols) > 0:
-
-        avg_value = df[numeric_cols[0]].mean()
+        col = numeric_cols[0]
+        avg_val = df[col].mean()
+        std_val = df[col].std()
+        median_val = df[col].median()
 
         findings.append(
-            f"The average value of '{numeric_cols[0]}' "
-            f"is {avg_value:.2f}."
+            f"Average {col}: {avg_val:.2f} | "
+            f"Median: {median_val:.2f} | "
+            f"Std Dev: {std_val:.2f}"
         )
+
+        # Concentration analysis
+        if len(df) >= 5:
+            top_5_share = (
+                df[col].nlargest(5).sum() / df[col].sum() * 100
+                if df[col].sum() > 0 else 0
+            )
+            findings.append(
+                f"Top 5 entries account for {top_5_share:.1f}% of total {col}."
+            )
 
     report["findings"] = findings
 
+    # ---------------------------------------------------
+    # Section 3 - Observations (LLM-generated)
+    # ---------------------------------------------------
+    report["observations"] = _generate_llm_observations(df, question)
 
     # ---------------------------------------------------
-    # SECTION 3 — OBSERVATIONS
+    # Section 4 - Business Implications (LLM-generated)
     # ---------------------------------------------------
-
-    report["observations"] = [
-
-        # Generic analytical observation
-        "The dataset shows variation across categories.",
-
-        # Suggest concentration effect
-        "Performance appears concentrated among top entries."
-    ]
-
-
-    # ---------------------------------------------------
-    # SECTION 4 — BUSINESS IMPLICATIONS
-    # ---------------------------------------------------
-
-    report["implications"] = [
-
-        # Strategic insight
-        "Focus business strategy on top-performing segments.",
-
-        # Growth recommendation
-        "Investigate underperforming segments for growth opportunities."
-    ]
-
-
-    # ---------------------------------------------------
-    # RETURN FINAL REPORT
-    # ---------------------------------------------------
+    report["implications"] = _generate_llm_implications(df, question)
 
     return report
+
+
+def _generate_llm_observations(df: pd.DataFrame, question: str) -> list:
+    """Generate data-driven observations using the LLM."""
+    preview = df.head(LLM_PREVIEW_ROWS).to_string(index=False)
+
+    prompt = f"""
+You are a data analyst. Based on this dataset for the question "{question}":
+
+{preview}
+
+Write exactly 3 specific, data-driven observations.
+Each observation must reference actual values from the data.
+Return ONLY the 3 observations, one per line, no numbering.
+"""
+
+    try:
+        response = ollama.chat(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        lines = [
+            line.strip().lstrip("0123456789.-) ")
+            for line in response["message"]["content"].strip().split("\n")
+            if line.strip() and len(line.strip()) > 10
+        ]
+        if len(lines) >= 2:
+            return lines[:3]
+
+    except Exception as e:
+        logger.warning("LLM observation generation failed: %s", e)
+
+    # Fallback to heuristic observations
+    observations = []
+    numeric_cols = df.select_dtypes(include="number").columns
+
+    if len(numeric_cols) > 0:
+        col = numeric_cols[0]
+        if df[col].std() > df[col].mean() * 0.5:
+            observations.append(
+                f"High variability detected in {col} "
+                f"(coefficient of variation: {df[col].std() / df[col].mean():.1%})."
+            )
+        else:
+            observations.append(
+                f"Values in {col} are relatively consistent "
+                f"(std dev: {df[col].std():.2f})."
+            )
+
+    observations.append(
+        f"The dataset contains {df.shape[0]} entries across {df.shape[1]} dimensions."
+    )
+
+    return observations
+
+
+def _generate_llm_implications(df: pd.DataFrame, question: str) -> list:
+    """Generate business implications using the LLM."""
+    preview = df.head(LLM_PREVIEW_ROWS).to_string(index=False)
+
+    prompt = f"""
+You are a business strategist. Based on this data for "{question}":
+
+{preview}
+
+Write exactly 3 actionable business implications.
+Each must be specific to this data, not generic advice.
+Return ONLY the 3 implications, one per line, no numbering.
+"""
+
+    try:
+        response = ollama.chat(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        lines = [
+            line.strip().lstrip("0123456789.-) ")
+            for line in response["message"]["content"].strip().split("\n")
+            if line.strip() and len(line.strip()) > 10
+        ]
+        if len(lines) >= 2:
+            return lines[:3]
+
+    except Exception as e:
+        logger.warning("LLM implication generation failed: %s", e)
+
+    # Fallback
+    return [
+        "Review top-performing segments for investment opportunities.",
+        "Investigate underperforming areas for potential improvements.",
+    ]

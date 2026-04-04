@@ -1,139 +1,137 @@
 """
+chart_generator.py
 
-This module generates charts using matplotlib and seaborn.
+Generates charts using matplotlib and seaborn.
 
-Input:
-    - dataframe
-    - chart type
-
-Output:
-    - saved chart image
+Input:  dataframe + chart type
+Output: saved chart image path
 """
 
-import os
+import logging
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 
+from config.settings import CHART_FIGSIZE, CHART_OUTPUT_DIR, CHART_DPI
 
-# Directory where charts will be stored
-OUTPUT_DIR = Path("outputs/charts") 
+logger = logging.getLogger(__name__)
 
-def get_next_chart_path():
+OUTPUT_DIR = Path(CHART_OUTPUT_DIR)
+
+
+def get_next_chart_path() -> Path:
     """
     Generate the next chart filename automatically.
 
-    Example output:
-    chart_001.png
-    chart_002.png
-    chart_003.png
+    Returns
+    -------
+    Path
+        Path for the next chart file.
     """
-
-    # Ensure directory exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Get all existing chart files
     existing = list(OUTPUT_DIR.glob("chart_*.png"))
 
     if not existing:
         next_id = 1
     else:
-        # Extract numeric IDs
-        ids = [int(f.stem.split("_")[1]) for f in existing]
-        next_id = max(ids) + 1
+        ids = []
+        for f in existing:
+            try:
+                ids.append(int(f.stem.split("_")[1]))
+            except (ValueError, IndexError):
+                continue
+        next_id = max(ids, default=0) + 1
 
-    filename = f"chart_{next_id:03d}.png"
-
-    return OUTPUT_DIR / filename
+    return OUTPUT_DIR / f"chart_{next_id:03d}.png"
 
 
-def generate_chart(df, chart_type):
+def generate_chart(df, chart_type: str) -> str:
     """
     Generate a chart from dataframe results.
 
     Parameters
     ----------
     df : pandas.DataFrame
-        Query result dataframe
-
+        Query result dataframe.
     chart_type : str
-        Type of chart to generate
+        Type of chart to generate (bar, line, scatter).
 
     Returns
     -------
-    str
-        Path of saved chart image
+    str or None
+        Path of saved chart image, or None if chart cannot be generated.
     """
-
-    # Ensure output directory exists
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    # Define output file path
-    chart_path = get_next_chart_path()
-    print("Saving chart to:", chart_path)
-
-    # Create figure canvas
-    plt.figure(figsize=(8, 5))
-
-    # BAR CHART
-    if chart_type == "bar":
-
-        # Detect numeric column automatically
-        numeric_col = df.select_dtypes(include="number").columns[0]
-
-        # Detect categorical column
-        categorical_col = df.select_dtypes(include="object").columns[0]
-
-        # x-axis: first column
-        # y-axis: second column
-        sns.barplot(
-            x=df[categorical_col],
-            y=df[numeric_col]
-        )
-
-        plt.xlabel(categorical_col)
-        plt.ylabel(numeric_col)
-        plt.title("Bar Chart Visualization")
-        plt.title(f"{numeric_col} by {categorical_col}")
-
-    # LINE CHART
-    elif chart_type == "line":
-
-        numeric_col = df.select_dtypes(include="number").columns[0]
-
-        sns.lineplot(
-            x=df.index,
-            y=df[numeric_col]
-        )
-
-        plt.title("Trend Over Time")
-
-    # SCATTER PLOT
-    elif chart_type == "scatter":
-
-        numeric_cols = df.select_dtypes(include="number").columns[:2]
-
-        sns.scatterplot(
-            x=df[numeric_cols[0]],
-            y=df[numeric_cols[1]]
-        )
-
-        plt.title("Relationship Between Variables")
-
-    else:
-        # If no valid chart type, return None
+    if df.empty:
+        logger.warning("Cannot generate chart: dataframe is empty.")
         return None
 
-    # Rotate x-axis labels if needed
-    plt.xticks(rotation=45)
+    numeric_cols = df.select_dtypes(include="number").columns
+    categorical_cols = df.select_dtypes(include="object").columns
 
-    # Adjust layout to avoid label clipping
-    plt.tight_layout()
+    chart_path = get_next_chart_path()
 
-    # Save chart image
-    plt.savefig(chart_path)
+    try:
+        fig, ax = plt.subplots(figsize=CHART_FIGSIZE)
 
-    # Close figure to free memory
-    plt.close()
+        if chart_type == "bar":
+            if len(numeric_cols) < 1 or len(categorical_cols) < 1:
+                logger.warning("Not enough columns for bar chart.")
+                plt.close(fig)
+                return None
 
-    return str(chart_path)
+            numeric_col = numeric_cols[0]
+            categorical_col = categorical_cols[0]
+
+            sns.barplot(
+                x=df[categorical_col],
+                y=df[numeric_col],
+                ax=ax
+            )
+            ax.set_xlabel(categorical_col)
+            ax.set_ylabel(numeric_col)
+            ax.set_title(f"{numeric_col} by {categorical_col}")
+
+        elif chart_type == "line":
+            if len(numeric_cols) < 1:
+                logger.warning("Not enough numeric columns for line chart.")
+                plt.close(fig)
+                return None
+
+            numeric_col = numeric_cols[0]
+
+            sns.lineplot(x=df.index, y=df[numeric_col], ax=ax)
+            ax.set_title(f"Trend of {numeric_col}")
+
+        elif chart_type == "scatter":
+            if len(numeric_cols) < 2:
+                logger.warning("Not enough numeric columns for scatter plot.")
+                plt.close(fig)
+                return None
+
+            sns.scatterplot(
+                x=df[numeric_cols[0]],
+                y=df[numeric_cols[1]],
+                ax=ax
+            )
+            ax.set_title(f"{numeric_cols[1]} vs {numeric_cols[0]}")
+
+        else:
+            logger.info("Chart type '%s' not supported, skipping.", chart_type)
+            plt.close(fig)
+            return None
+
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(chart_path, dpi=CHART_DPI)
+        plt.close(fig)
+
+        logger.info("Chart saved to: %s", chart_path)
+        return str(chart_path)
+
+    except Exception as e:
+        logger.error("Failed to generate chart: %s", e)
+        plt.close("all")
+        return None
