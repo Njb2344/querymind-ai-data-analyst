@@ -23,7 +23,7 @@ from visualization.chart_selector import select_chart
 from visualization.chart_generator import generate_chart
 
 
-def run_question(question: str):
+def run_question(question: str, context=None):
     """
     Run a full natural language query pipeline.
 
@@ -42,10 +42,31 @@ def run_question(question: str):
     print(question)
 
     # -------------------------------------------------
+    # STEP 0 — BUILD CONTEXT FOR LLM
+    # -------------------------------------------------
+
+    # If conversation history exists, build a context string
+    history_text = ""
+
+    if context:
+
+        # Only use the last few queries to avoid long prompts
+        recent_context = context[-3:]
+
+        for item in recent_context:
+
+            history_text += f"""
+Previous Question: {item['question']}
+SQL Used: {item['sql']}
+"""
+            
+    
+
+    # -------------------------------------------------
     # Step 1 — Generate SQL from LLM
     # -------------------------------------------------
 
-    sql_query = generate_sql(question)
+    sql_query = generate_sql(question, history_text)
 
     print("\nGenerated SQL:")
     print(sql_query)
