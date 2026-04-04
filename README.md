@@ -104,15 +104,15 @@ python database/load_data.py
 
 ### Configuration
 
-Edit `.env.example` and update values if needed:
+Edit `.env` and update values if needed:
 
 ```
-DB_HOST=localhost
+DB_HOST=host_name
 DB_PORT=5432
-DB_NAME=querymind_db
-DB_USER=postgres
-DB_PASSWORD=postgres
-LLM_MODEL=llama3
+DB_NAME=db_name
+DB_USER=db_user
+DB_PASSWORD=db_password
+LLM_MODEL=llm_model_name
 ```
 
 ### Run
