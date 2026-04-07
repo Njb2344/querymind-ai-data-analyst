@@ -156,15 +156,29 @@ def numeric_distributions(df):
     # Create a histogram for each numeric column
     for col in numeric_cols:
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=DASHBOARD_FIGSIZE)
+        fig.patch.set_facecolor("#0E1117")
+        ax.set_facecolor("#1A1D23")
 
         sns.histplot(
             df[col],
-            kde=True,     # Add density curve
-            ax=ax
+            kde=True,
+            ax=ax,
+            color="#4F8BF9",
+            edgecolor="#1A1D23",
+            alpha=0.7
         )
 
-        ax.set_title(f"Distribution of {col}")
+        ax.set_title(
+            f"Distribution of {col.replace('_', ' ').title()}",
+            color="#FAFAFA", fontsize=12, fontweight="bold"
+        )
+        ax.tick_params(colors="#FAFAFA")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color("#2A2D35")
+        ax.spines["bottom"].set_color("#2A2D35")
+        plt.tight_layout()
 
         figures.append(fig)
 
@@ -203,15 +217,22 @@ def correlation_heatmap(df):
 
     # Create heatmap figure
     fig, ax = plt.subplots(figsize=DASHBOARD_FIGSIZE)
+    fig.patch.set_facecolor("#0E1117")
+    ax.set_facecolor("#1A1D23")
 
     sns.heatmap(
         corr,
-        annot=True,        # display correlation values
+        annot=True,
         cmap="coolwarm",
-        ax=ax
+        ax=ax,
+        annot_kws={"color": "#FAFAFA", "fontsize": 9}
     )
 
-    ax.set_title("Correlation Heatmap")
+    ax.set_title(
+        "Correlation Heatmap",
+        color="#FAFAFA", fontsize=12, fontweight="bold"
+    )
+    ax.tick_params(colors="#FAFAFA")
 
     return fig
 

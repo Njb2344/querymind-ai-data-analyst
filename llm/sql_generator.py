@@ -152,6 +152,13 @@ def generate_sql(user_question: str, context: str = "") -> str:
             "Please try rephrasing your question."
         )
 
+    # Remove anything after the first semicolon
+    # (LLMs often add explanations or extra statements after the SQL)
+    if ";" in sql_query:
+        sql_query = sql_query[:sql_query.index(";")]
+
+    sql_query = sql_query.strip()
+
     logger.info("SQL generated successfully.")
     logger.debug("Generated SQL: %s", sql_query)
 
